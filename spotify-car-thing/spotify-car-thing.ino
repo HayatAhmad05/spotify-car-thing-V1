@@ -5,32 +5,44 @@
 #include <TJpg_Decoder.h>
 #include <SPIFFS.h>
 
-String imageLink; // Declare globally to store the image URL
-int currentSongPosition = 0; // Declare globally to store the current song position
-int songDuration = 0; // Declare globally to store the song duration
-int imageScaleSize = 2;
-
 // Replace with your network credentials
-const char* ssid = "WIFINAME"; // Your Wi-Fi SSID
-const char* password = "PASSWORD"; // Your Wi-Fi password
-
-//TFT Display Instance
-TFT_eSPI tft = TFT_eSPI();
+const char* ssid = "WIFI_NAME"; 
+const char* password = "WIFI_PASSWORD"; 
 
 // Spotify API credentials
-const char* clientId = "CLIENTID";
-const char* clientSecret = "CLIENTSECRET";
-String redirectUri = "CALLBACKURL"; // Change this to your redirect URI
-String accessToken = "ACCESSTOKEN"; // Replace with your actual access token
-String refreshToken = "REFRESHTOKEN"; // Replace with your actual refresh token
-
-unsigned long previousMillis = 0; // Store the last time the track was checked
-const long interval = 500; // Interval to check the currently playing track (0.5 seconds)
+const char* clientId = "CLIENT_ID";
+const char* clientSecret = "CLIENT_SECRET";
+String redirectUri = "CALLBACK_URL"; 
+String accessToken = "ACCESS_TOKEN"; 
+String refreshToken = "REFREASH_TOKEN"; // Replace with your actual refresh token
 
 //Default Song Information
 const char* trackName = "Not Available";
 const char* artistName = "Not Available";
 const char* albumName = "Not Available";
+
+// Add these global variables
+int currentSongPosition = 0;  // Current position in milliseconds
+int songDuration = 0;        // Total duration in milliseconds
+unsigned long lastProgressUpdate = 0;  // For tracking progress updates
+char timeBuffer[16];  // Buffer to store the time string
+String imageLink; // Declare globally to store the image URL
+String PrevImageLink = ""; //Optimize the SPIFFS Download
+int imageScaleSize = 2; 
+unsigned long previousMillis = 0; // Store the last time the track was checked
+const long interval = 500; // Interval to check the currently playing track (0.5 seconds)
+
+//TFT Display Instance
+TFT_eSPI tft = TFT_eSPI();
+
+// First, add this callback function outside of updatedisplay
+// This is required for TJpg_Decoder to work with your TFT display
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap)
+{
+    tft.pushImage(x, y, w, h, bitmap);
+    return true;
+}
+
 
 // Function to connect to Wi-Fi
 void connectToWiFi() {
@@ -42,10 +54,6 @@ void connectToWiFi() {
   }
   Serial.println("Connected to WiFi");
 }
-
-
-
-
 
 // Function to refresh the access token
 void refreshAccessToken() {
@@ -80,10 +88,6 @@ void refreshAccessToken() {
 }
 
 
-
-
-
-
 // Function to get the currently playing track
 void getCurrentPlayingTrack() {
     if (accessToken.length() == 0) {
@@ -105,8 +109,10 @@ void getCurrentPlayingTrack() {
             trackName = doc["item"]["name"];
             artistName = doc["item"]["artists"][0]["name"]; 
             albumName = doc["item"]["album"]["name"];
+            currentSongPosition = doc["progress_ms"].as<int>();
+            songDuration = doc["item"]["duration_ms"].as<int>();
 
-              // Get the smallest suitable image URL (minimum 300x300)
+            // Get the smallest suitable image URL (300x300)
             JsonArray images = doc["item"]["album"]["images"];
             int selectedWidth = 0;
             for (JsonVariant image : images) {
@@ -121,14 +127,18 @@ void getCurrentPlayingTrack() {
             
             
             if (imageLink.length() == 0 && images.size() > 0) {
-                imageLink = images[0]["url"].as<String>();  // Changed to use first (largest) image
+                imageLink = images[0]["url"].as<String>();  // Changed to largest image
                 selectedWidth = images[0]["width"].as<int>();
             }
 
             Serial.println("Selected image size: " + String(selectedWidth) + "x" + String(selectedWidth));
+            if (PrevImageLink != imageLink)
+            {
+                // Save the album art to SPIFFS using our custom function
+                saveAlbumArtToSPIFFS(imageLink);
+            }
             
-            // Save the album art to SPIFFS using our custom function
-            saveAlbumArtToSPIFFS(imageLink);
+            PrevImageLink = imageLink;
             updatedisplay(trackName, artistName, albumName);
             
         } else {
@@ -145,60 +155,6 @@ void getCurrentPlayingTrack() {
     http.end();
 }
 
-// First, add this callback function outside of updatedisplay
-// This is required for TJpg_Decoder to work with your TFT display
-bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap)
-{
-    tft.pushImage(x, y, w, h, bitmap);
-    return true;
-}
-
-void updatedisplay(const char* Track, const char* Artist, const char* Album) {
-    static String lastTrack = "";
-    static String lastArtist = "";
-    static String lastAlbum = "";
-
-    // Only update if the song has changed
-    if (lastTrack != Track) {
-        tft.fillScreen(TFT_BLACK); // Clear screen only when song changes
-
-        // Update album art only when song changes
-        if(SPIFFS.exists("/albumArt.jpg")) {
-            // Initialize JPEG decoder
-            TJpgDec.setJpgScale(imageScaleSize);    
-            TJpgDec.setSwapBytes(true);
-            TJpgDec.setCallback(tft_output);
-
-            // Calculate center position for image
-            int imageX = (tft.width() - 150) / 2;
-            int imageY = 20;
-
-            // Draw the JPEG image from SPIFFS
-            TJpgDec.drawFsJpg(imageX, imageY, "/albumArt.jpg");
-        }
-
-        // Update text
-        tft.setTextColor(TFT_WHITE);
-        tft.setTextSize(1);
-
-        tft.setCursor(10, 200);
-        tft.print("Track: ");
-        tft.println(Track);
-
-        tft.setCursor(10, 220);
-        tft.print("Artist: ");
-        tft.println(Artist);
-
-        tft.setCursor(10, 240);
-        tft.print("Album: ");
-        tft.println(Album);
-
-        // Update last known values
-        lastTrack = Track;
-        lastArtist = Artist;
-        lastAlbum = Album;
-    }
-}
 
 void saveAlbumArtToSPIFFS(const String& imageUrl) {
     HTTPClient http;
@@ -253,6 +209,100 @@ void saveAlbumArtToSPIFFS(const String& imageUrl) {
 
 
 
+void updatedisplay(const char* Track, const char* Artist, const char* Album) {
+    static String lastTrack = "";
+    static String lastArtist = "";
+    static String lastAlbum = "";
+
+    // Only update if the song has changed
+    if (lastTrack != Track || lastArtist != Artist || lastAlbum != Album) {
+        tft.fillScreen(TFT_BLACK); 
+
+        // Update album art
+        if(SPIFFS.exists("/albumArt.jpg")) {
+            // Initialize JPEG decoder
+            TJpgDec.setJpgScale(imageScaleSize);    
+            TJpgDec.setSwapBytes(true);
+            TJpgDec.setCallback(tft_output);
+
+            // Calculate center position for image
+            int imageX = (tft.width() - 150) / 2;
+            int imageY = 20;
+
+            // Draw the JPEG image from SPIFFS
+            TJpgDec.drawFsJpg(imageX, imageY, "/albumArt.jpg");
+        }
+
+        // Update text
+        tft.setTextColor(TFT_WHITE);
+        tft.setTextSize(1);
+
+        tft.setCursor(10, 200);
+        tft.print("Track: ");
+        tft.println(Track);
+
+        tft.setCursor(10, 220);
+        tft.print("Artist: ");
+        tft.println(Artist);
+
+        tft.setCursor(10, 240);
+        tft.print("Album: ");
+        tft.println(Album);
+
+        // Update last known values
+        lastTrack = Track;
+        lastArtist = Artist;
+        lastAlbum = Album;
+    }
+
+    // Always draw the progress bar
+    drawProgressBar();
+}
+
+
+void drawProgressBar() {
+    if (songDuration <= 0) return;  
+
+    // Define progress bar dimensions
+    int barWidth = tft.width() - 20;  
+    int barHeight = 10;
+    int barX = 10;  
+    int barY = tft.height() - barHeight - 20;  
+    int cornerRadius = 4;  
+
+    // Draw background bar (with rounded corners)
+    tft.fillRoundRect(barX, barY, barWidth, barHeight, cornerRadius, TFT_DARKGREY);
+
+    // Calculate and draw progress
+    float progress = (float)currentSongPosition / songDuration;
+    int progressWidth = (int)(barWidth * progress);
+    
+    // Draw the progress bar (with rounded corners)
+    if (progressWidth > 0) {
+        tft.fillRoundRect(barX, barY, progressWidth, barHeight, cornerRadius, TFT_GREEN);
+    }
+
+    // Draw border (with rounded corners)
+    tft.drawRoundRect(barX, barY, barWidth, barHeight, cornerRadius, TFT_WHITE);
+    
+    int elapsedSeconds = currentSongPosition / 1000;
+    int totalSeconds = songDuration / 1000;
+    
+    
+    tft.fillRect(barX, barY - 15, barWidth, 15, TFT_BLACK);
+    
+    // Set text properties before drawing
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);  
+    tft.setTextSize(1);
+    tft.setCursor(barX, barY - 15);
+    
+    
+    sprintf(timeBuffer, "%02d:%02d / %02d:%02d",
+            (elapsedSeconds / 60) % 60, elapsedSeconds % 60,
+            (totalSeconds / 60) % 60, totalSeconds % 60);
+    
+    tft.print(timeBuffer);
+}
 
 
 void setup() {
@@ -276,13 +326,18 @@ void setup() {
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis; // Save the last time we checked
-    getCurrentPlayingTrack(); // Fetch the currently playing track
-  }
-  //displayAlbumArt(imageLink);
-  //updatedisplay(trackName, artistName, albumName);
-
-  
+    unsigned long currentMillis = millis();
+    
+    // Update track info every interval
+    if (currentMillis - previousMillis >= interval) {
+        previousMillis = currentMillis;
+        getCurrentPlayingTrack();
+    }
+    
+    if (currentMillis - lastProgressUpdate >= 500) {  // Update every 500ms
+        lastProgressUpdate = currentMillis;
+        if (songDuration > 0) {
+            drawProgressBar();
+        }
+    }
 }
