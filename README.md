@@ -1,5 +1,5 @@
 
-# Spotify Car Thing - V1
+# Spotify Desktop Assisstant - V1
 
 An ESP32 project allowing you to display your current Spotify song information onto a TFT display, usinf the Spotify API.
 
