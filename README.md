@@ -87,6 +87,8 @@ Change the pinout for your TFT Display and save it.
 
 For any further qustions or help contact sh2ahmad@uwaterloo.ca
 
+-- Ayesha Approved 
+
 
 
 
