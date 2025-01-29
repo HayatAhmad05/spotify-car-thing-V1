@@ -1,5 +1,5 @@
 
-# Spotify Desktop Assisstant - V1
+# Spotify Desktop Assistant - V1
 
 An ESP32 project allowing you to display your current Spotify song information onto a TFT display, using the Spotify API.
 
